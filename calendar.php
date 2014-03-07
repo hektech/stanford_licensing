@@ -58,10 +58,11 @@ mysql_select_db($resource_databaseName, $linkID) or die("Could not find Resource
 $display = array();
 $calendarSettings = new CalendarSettings();
 
+//TODO: consolidate the following two sections (Subscription and Invoice) to reduce duplicate code
 try{
 	$calendarSettingsArray = $calendarSettings->allAsArray();
 }catch(Exception $e){
-	echo "<span style='color:red'>There was an error with the CalendarSettings Table please verify the table has been created.</span>";
+	echo "<span style='color:red'>There was an error with the CalendarSettings Table. Please verify the table has been created.</span>";
 	exit;
 }
 
@@ -95,6 +96,46 @@ try{
 		echo "<span style='color:red'>There was an error with the CalendarSettings Configuration.</span>";
 		exit;
 	}
+
+try{
+        $calendarSettingsArray = $calendarSettings->allAsArray();
+}catch(Exception $e){
+        echo "<span style='color:red'>There was an error with the CalendarSettings Table. Please verify the table has been created.</span>";
+        exit;
+}
+
+        foreach($calendarSettingsArray as $display) {
+                $config_error = TRUE;
+                if (strtolower($display['shortName']) == strtolower('Days After Invoice is Due')) {
+                        if (strlen($display['value'])>0) {
+                                $daybefore = $display['value'];
+                                $config_error = FALSE;
+                        }
+                } elseif (strtolower($display['shortName']) == strtolower('Days Before Invoice is Due')) {
+                        if (strlen($display['value'])>0) {
+                                $dayafter = $display['value'];
+                                $config_error = FALSE;
+                        }
+                } elseif (strtolower($display['shortName']) == strtolower('Resource Type(s)')) {
+                        if (strlen($display['value'])>0) {
+                                $resourceType = $display['value'];
+                                $config_error = FALSE;
+                        }
+                } elseif (strtolower($display['shortName']) == strtolower('Authorized Site(s)')) {
+                        if (strlen($display['value'])>0) {
+                                $authorizedSiteID = preg_split("/[\s,]+/", $display['value']);
+                                $config_error = FALSE;
+                        }
+                }
+        }
+
+        // Validate the config settings
+        if ($config_error) {
+                echo "<span style='color:red'>There was an error with the CalendarSettings Configuration.</span>";
+                exit;
+        }
+
+
 	
 $query = "
 SELECT DATE_FORMAT(`$resource_databaseName`.`Resource`.`subscriptionEndDate`, '%Y') AS `year`, 
@@ -121,13 +162,40 @@ WHERE
 $query = $query . "ORDER BY `sortdate`, `$resource_databaseName`.`Resource`.`titleText`";
 $result = mysql_query($query, $linkID) or die("Bad Query Failure");
 
+$queryInvoice = "
+SELECT DATE_FORMAT(`$resource_databaseName`.`Resource`.`invoiceDate`, '%Y') AS `year`,
+DATE_FORMAT(`$resource_databaseName`.`Resource`.`invoiceDate`, '%M') AS `month`,
+DATE_FORMAT(`$resource_databaseName`.`Resource`.`invoiceDate`, '%y-%m-%d') AS `sortdate`,
+DATE_FORMAT(`$resource_databaseName`.`Resource`.`invoiceDate`, '%m/%d/%Y') AS `invoiceDate`,
+`$resource_databaseName`.`Resource`.`resourceID`, `$resource_databaseName`.`Resource`.`titleText`,
+`$license_databaseName`.`License`.`shortName`,
+`$license_databaseName`.`License`.`licenseID`, `$resource_databaseName`.`ResourceType`.`shortName` AS resourceTypeName, `$resource_databaseName`.`ResourceType`.`resourceTypeID`
+FROM `$resource_databaseName`.`Resource`
+LEFT JOIN `$resource_databaseName`.`ResourceLicenseLink` ON (`$resource_databaseName`.`Resource`.`resourceID` = `$resource_databaseName`.`ResourceLicenseLink`.`resourceID`)
+LEFT JOIN `$license_databaseName`.`License` ON (`ResourceLicenseLink`.`licenseID` = `$license_databaseName`.`License`.`licenseID`)
+INNER JOIN `$resource_databaseName`.`ResourceType` ON (`$resource_databaseName`.`Resource`.`resourceTypeID` = `$resource_databaseName`.`ResourceType`.`resourceTypeID`)
+WHERE
+`$resource_databaseName`.`Resource`.`archiveDate` IS NULL AND
+`$resource_databaseName`.`Resource`.`invoiceDate` IS NOT NULL AND
+`$resource_databaseName`.`Resource`.`invoiceDate` <> '00/00/0000' AND
+`$resource_databaseName`.`Resource`.`invoiceDate` BETWEEN (CURDATE() - INTERVAL " . $daybefore . " DAY) AND (CURDATE() + INTERVAL " . $dayafter . " DAY) ";
+
+        if ($resourceType) {
+                $queryInvoice = $queryInvoice . " AND `$resource_databaseName`.`Resource`.`resourceTypeID` IN ( ". $resourceType . " ) ";
+        }
+
+$queryInvoice = $queryInvoice . "ORDER BY `sortdate`, `$resource_databaseName`.`Resource`.`titleText`";
+$resultInvoice = mysql_query($queryInvoice, $linkID) or die("Bad Query Failure");
+
 ?>
+
+<?php if ($config->settings->enableAlerts == 'Y'){ ?>
 
 <div style='text-align:left;'>
 	<table class="headerTable" style="background-image:url('images/header.gif');background-repeat:no-repeat;">
 		<tr style='vertical-align:top;'>
 			<td>
-				<b>Upcoming License Renewals</b>
+				<b>License Renewals</b>
 			</td>
 		</tr>
 	</table>
@@ -230,9 +298,9 @@ $result = mysql_query($query, $linkID) or die("Bad Query Failure");
 					    $html = $html . "- Expires in ";
 					
 						if ($date1 > $date2) {
-							$html = $html . "<span style='color:red'>(" . $num_days . " days)</span>"; ;
+							$html = $html . "- <span style='color:red'>Expired " . $num_days . " days ago</span>"; ;
 						} else {
-							$html = $html . $num_days . " days "; ;
+							$html = $html . "- Expires in " . $num_days . " days "; ;
 						}					
 					}
 
@@ -269,18 +337,183 @@ $result = mysql_query($query, $linkID) or die("Bad Query Failure");
 							$displayMonth = FALSE;
 						}						
 						echo $html;
-					}
-						
-				}
-				
-			?>	
-			</tbody>
-		</table>
-	</div>	
-</div>
-<br />
+                                       }
 
+                                }
+
+                        $html = "";
+                        if ($i < 0) {
+                               $html = $html . "<br>No license renewals at this time<br><br></td>";
+                               echo $html;
+                        }
+
+                        ?>
+                        </tbody>
+		</table>
+        </div>
+</div>
+<?php } ?>
+
+<?php if ($config->settings->enableDueDates == 'Y'){ ?>
+<div style='text-align:left;'>
+        <table class="headerTable" style="background-image:url('images/header.gif');background-repeat:no-repeat;">
+                <tr style='vertical-align:top;'>
+                        <td>
+                                <b>Invoice Due Dates</b>
+                        </td>
+                </tr>
+        </table>
+
+        <div id="searchResults">
+		<table style="width: 100%;" class="dataTable">
+                        <tbody>
+                        <?php
+                                $mYear = "";
+                                $mMonth = "";
+                                $month_html = "";
+                                $year_html = "";
+
+                                $displayYear = FALSE;
+                                $displayMonth = FALSE;
+
+                                $i = -1;
+
+                                while ($row = mysql_fetch_assoc($resultInvoice)) {
+                                        $queryInvoice2 = "SELECT
+                                          `$resource_databaseName`.`Resource`.`resourceID`,
+                                          `$resource_databaseName`.`AuthorizedSite`.`shortName`,
+                                          `$resource_databaseName`.`AuthorizedSite`.`authorizedSiteID`
+                                        FROM
+                                          `$resource_databaseName`.`Resource`
+                                          INNER JOIN `$resource_databaseName`.`ResourceAuthorizedSiteLink` ON (`$resource_databaseName`.`Resource`.`resourceID` = `$resource_databaseName`.`ResourceAuthorizedSiteLink`.`resourceID`)
+                                          INNER JOIN `$resource_databaseName`.`AuthorizedSite` ON (`$resource_databaseName`.`ResourceAuthorizedSiteLink`.`authorizedSiteID` = `$resource_databaseName`.`AuthorizedSite`.`authorizedSiteID`)
+                                        WHERE
+                                          `$resource_databaseName`.`Resource`.`resourceID` = " . $row["resourceID"] .
+                                          " order by `$resource_databaseName`.`AuthorizedSite`.`shortName`";
+
+                                        $resultInvoice2 = mysql_query($queryInvoice2, $linkID) or die("Bad Query Failure");
+
+                                        $i = $i + 1;
+                                        $html = "";
+
+                                                if ($mYear != $row["year"])  {
+                                                        $mYear = $row["year"];
+
+                                                        $year_html = "";
+                                                        $year_html = $year_html . "<tr>";
+                                                        $year_html = $year_html . "<th colspan='2'>
+                                                                                                        <table class='noBorderTable'>
+                                                                                                                <tbody>
+                                                                                                                        <tr>
+                                                                                                                                <td>" . $mYear . "</td>
+                                                                                                                        </tr>
+                                                                                                                </tbody>
+                                                                                                        </table>
+                                                                                                </th>";
+                                                        $year_html = $year_html . "</tr>";
+                                                        $displayYear = TRUE;
+                                                }
+
+                                                if ($mMonth != $row["month"]) {
+                                                        $mMonth = $row["month"];
+
+                                                        $month_html = "";
+                                                        $month_html = $month_html . "<tr>";
+                                                        $month_html = $month_html . "<th colspan='2'>
+                                                                                                        <table class='noBorderTable'>
+                                                                                                                <tbody>
+                                                                                                                        <tr>
+                                                                                                                                <td>&nbsp;&nbsp;&nbsp;" . $mMonth . "</td>
+                                                                                                                        </tr>
+                                                                                                                </tbody>
+                                                                                                        </table>
+                                                                                                </th>";
+                                                        $month_html = $month_html . "</tr>";
+                                                        $displayMonth = TRUE;
+                                                }
+
+                                        $html = $html . "<tr>";
+
+                                                if ($i % 2 == 0) {
+                                                        $alt = "alt";
+                                                } else {
+                                                        $alt = "";
+                                                }
+
+                                        $date1 = new DateTime(date("m/d/y"));
+                                        $date2 = new DateTime($row["invoiceDate"]);
+                                        $interval = $date1->diff($date2);
+
+                                        $num_days = ((($interval->y) * 365) + (($interval->m) * 30) + ($interval->d));
+
+                                        $html = $html . "<td  colspan='2' class='$alt'>";
+
+                                        $html = $html . "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<a href='../resources/resource.php?resourceID=" . $row["resourceID"] . "'><b>". $row["titleText"] . "</b></a>";
+                                        $html = $html . " - " . $row["resourceTypeName"] . " ";
+
+                                                if ($date1 > $date2) {
+                                                        $html = $html . "- <span style='color:red'>Due " . $num_days . " days ago</span>"; ;
+                                                } else {
+                                                        $html = $html . "- Due in " . $num_days . " days "; ;
+                                                }
+
+                                        $k = 0;
+                                        $siteID = array();
+
+                                                while ($row2 = mysql_fetch_assoc($resultInvoice2)) {
+                                                        if ($k == 0) {
+                                                                $html = $html . "</td></tr>";
+                                                                $html = $html . "<tr>
+                                                                        <td class='$alt'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td>
+                                                                        <td class='$alt'>Participants:  ";
+                                                        } else {
+                                                                $html = $html . ", ";
+                                                        }
+
+                                                        $html = $html . $row2["shortName"];
+                                                        array_push( $siteID, $row2["authorizedSiteID"] );
+                                                        $k = $k + 1;
+                                                }
+
+                                        $arr3 = array_intersect($authorizedSiteID, $siteID);
+
+                                        $html = $html . "</td>";
+                                        $html = $html . "</tr>";
+
+                                        if (count($arr3) > 0) {
+                                                if ($displayYear) {
+                                                        echo $year_html;
+                                                        $displayYear = FALSE;
+                                                }
+                                                if ($displayMonth) {
+                                                        echo $month_html;
+                                                        $displayMonth = FALSE;
+                                                }
+                                                echo $html;
+                                        }
+
+                                }
+
+                        $html = "";
+			if ($i < 0) {
+ 	                       $html = $html . "<br>No invoice due dates at this time<br><br></td>";
+                               echo $html;
+			}
+
+                        ?>
+                        </tbody>
+                </table>
+        </div>
+</div>
+<?php } ?>
+
+<br />
 <?php
+
+if (($config->settings->enableAlerts == 'N') and ($config->settings->enableDueDates == 'N')) {
+	$html = $html . "<br>No settings are enabled in the configuration.ini file<br><br>";
+	echo $html;
+}
 
   //print footer
   include 'templates/footer.php';
