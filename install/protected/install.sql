@@ -528,6 +528,8 @@ INSERT INTO `_DATABASE_NAME_`.CalendarSettings VALUES (1,'Days Before Subscripti
 INSERT INTO `_DATABASE_NAME_`.CalendarSettings VALUES (2,'Days After Subscription End','90');
 INSERT INTO `_DATABASE_NAME_`.CalendarSettings VALUES (3,'Resource Type(s)','1');
 INSERT INTO `_DATABASE_NAME_`.CalendarSettings VALUES (4,'Authorized Site(s)','1');
+INSERT INTO `_DATABASE_NAME_`.CalendarSettings VALUES (5,'Days Before Invoice is Due','180');
+INSERT INTO `_DATABASE_NAME_`.CalendarSettings VALUES (6,'Days After Invoice is Due','90');
 
 
 ALTER TABLE `_DATABASE_NAME_`.`Attachment` ADD INDEX `licenseID` ( `licenseID` );
